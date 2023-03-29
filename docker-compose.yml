@@ -1,0 +1,134 @@
+version: "3"
+services:
+  influxdb:
+    image: influxdb:latest
+    ports:
+      - "8083:8083"
+      - "8086:8086" # Influxdb UI
+      - "8090:8090"
+    env_file:
+      - "envs/influxdb.env"
+    restart: always
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+    ports:
+      - "3000:3000" # Grafana UI
+    env_file:
+      - "envs/grafana.env"
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana-data:/var/lib/grafana 
+  
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.16.3
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - cluster.initial_master_nodes=elasticsearch
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:7.16.3
+    container_name: logstash
+    volumes:
+      - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    ports:
+      - "5959:5959"
+    depends_on:
+      - elasticsearch
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.16.3
+    container_name: kibana
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "5601:5601" # Kibana UI
+    depends_on:
+      - elasticsearch
+
+  worker_a:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    env_file:
+      - "envs/workerA.env"
+    volumes:
+      - ./app:/app
+    depends_on:
+      - influxdb
+      - grafana
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090" # Prometheus UI
+    volumes:
+      - prometheus-data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.35
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger UI
+
+  heimdall:
+    image: linuxserver/heimdall
+    container_name: heimdall
+    ports:
+      - "8099:443" # Heimdall UI
+    volumes:
+      - /home/user/appdata/heimdall:/config
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+    restart: unless-stopped
+
+  phlare:
+    image: grafana/phlare:latest
+    ports:
+      - "4100:4100"
+    volumes:
+      - ./demo.yaml:/etc/phlare/demo.yaml
+    command:
+      - --config.file=/etc/phlare/demo.yaml
+
+  ngrok:
+    image: shkoliar/ngrok:latest
+    ports:
+      - 4551:4551
+    links:
+      - grafana
+    environment:
+      - DOMAIN=grafana
+      - PORT=3000
+      - DEBUG=true
+      - AUTH_TOKEN=2BDDhY7SwITKMaqxngafCxbgQIK_5uLWQQ6tb2K8vJ5peYaXU
+
+
+volumes:
+  influxdb-data:
+  grafana-data:
+  elasticsearch-data:
+  prometheus-data:
